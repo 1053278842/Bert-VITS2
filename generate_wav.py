@@ -1,6 +1,7 @@
 from webui import tts_fn
 import utils
 import os
+import numpy as np
 from config import config
 from infer import latest_version, get_net_g
 from scipy.io.wavfile import write
