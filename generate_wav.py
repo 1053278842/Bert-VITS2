@@ -14,30 +14,44 @@ from datetime import datetime
 
 url = "http://121.36.251.16:7999/api/upload"
 
-def send_audio(audio_data, sample_rate=44100):
-    # 保证 audio_data 是 numpy 数组
-    if isinstance(audio_data, list):
-        # list 里可能是多个 ndarray，拼接成一维
-        audio_data = np.concatenate([np.array(a, dtype=np.float32).flatten() for a in audio_data])
-    else:
-        audio_data = np.array(audio_data, dtype=np.float32).flatten()
+def save_and_upload_tts(result, folder="output"):
+    """
+    保存 tts_fn 结果到本地 wav 文件 → 上传到云端 → 删除本地文件
+    :param result: tts_fn 返回值, 形如 ("Success", (sr, audio_array))
+    :param folder: 临时保存的文件夹
+    """
+    status, audio_data = result
+    if status != "Success":
+        raise ValueError(f"TTS 失败: {status}")
 
-    # 写入内存 buffer
-    wav_buffer = io.BytesIO()
-    sf.write(wav_buffer, audio_data, sample_rate, format="WAV")
-    wav_buffer.seek(0)
+    sr, audio_array = audio_data
 
-    # 动态文件名
+    # 确保保存目录存在
+    os.makedirs(folder, exist_ok=True)
+
+    # 文件名 audio_20250923_153000.wav
     filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    file_path = os.path.join(folder, filename)
 
-    # 发送请求
-    files = {"file": (filename, wav_buffer, "audio/wav")}
-    response = requests.post(url, files=files)
+    # 保存到本地
+    write(file_path, sr, audio_array)
+    print(f"已保存音频到本地: {file_path}")
 
-    print("状态码:", response.status_code)
-    print("返回文本:", response.text)
-    wav_buffer.close()
+    # 上传到云端
+    with open(file_path, "rb") as f:
+        files = {"file": (filename, f, "audio/wav")}
+        response = requests.post(url, files=files)
 
+    print("上传状态码:", response.status_code)
+    print("上传返回:", response.text)
+
+    # 删除本地文件
+    try:
+        os.remove(file_path)
+        print(f"已删除本地文件: {file_path}")
+    except Exception as e:
+        print(f"删除本地文件失败: {e}")
+        
 def save_tts_result(result, filename="output.wav"):
     status, audio_data = result
     if status != "Success":
@@ -92,5 +106,4 @@ if __name__ == "__main__":
         style_weight,
     )
 
-    status, audio_data = result
-    send_audio(audio_data=audio_data,sample_rate=44100)
+    save_and_upload_tts(result=result)
