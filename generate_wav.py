@@ -14,22 +14,29 @@ from datetime import datetime
 
 url = "http://121.36.251.16:7999/api/upload"
 
-def send_audio(audio_data, sample_rate):
-    """
-    audio_data: numpy.ndarray 格式的音频数组
-    sample_rate: 采样率，例如 22050
-    """
-    # 把音频写入内存字节流
-    with io.BytesIO() as wav_buffer:
-        sf.write(wav_buffer, audio_data, sample_rate, format="WAV")
-        wav_buffer.seek(0)  # 回到开头，才能上传
-        filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
-        files = {"file": (filename, wav_buffer, "audio/wav")}
-        response = requests.post(url, files=files)
+def send_audio(audio_data, sample_rate=44100):
+    # 保证 audio_data 是 numpy 数组
+    if isinstance(audio_data, list):
+        # list 里可能是多个 ndarray，拼接成一维
+        audio_data = np.concatenate([np.array(a, dtype=np.float32).flatten() for a in audio_data])
+    else:
+        audio_data = np.array(audio_data, dtype=np.float32).flatten()
+
+    # 写入内存 buffer
+    wav_buffer = io.BytesIO()
+    sf.write(wav_buffer, audio_data, sample_rate, format="WAV")
+    wav_buffer.seek(0)
+
+    # 动态文件名
+    filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+
+    # 发送请求
+    files = {"file": (filename, wav_buffer, "audio/wav")}
+    response = requests.post(url, files=files)
 
     print("状态码:", response.status_code)
     print("返回文本:", response.text)
-    return response
+    wav_buffer.close()
 
 def save_tts_result(result, filename="output.wav"):
     status, audio_data = result
