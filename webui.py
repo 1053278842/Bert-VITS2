@@ -330,6 +330,18 @@ def tts_fn(
     style_text=None,
     style_weight=0,
 ):
+    print("text:",text)
+    print("speaker:",speaker)
+    print("sdp_ratio:",sdp_ratio)
+    print("noise_scale:",noise_scale)
+    print("noise_scale_w:",noise_scale_w)
+    print("length_scale:",length_scale)
+    print("language:",language)
+    print("reference_audio:",reference_audio)
+    print("emotion:",emotion)
+    print("prompt_mode:",prompt_mode)
+    print("style_text:",style_text)
+    print("style_weight:",style_weight)
     if style_text == "":
         style_text = None
     if prompt_mode == "Audio prompt":
