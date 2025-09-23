@@ -23,7 +23,8 @@ def send_audio(audio_data, sample_rate):
     with io.BytesIO() as wav_buffer:
         sf.write(wav_buffer, audio_data, sample_rate, format="WAV")
         wav_buffer.seek(0)  # 回到开头，才能上传
-        files = {"file": (f"audio{datetime.now().strftime("%Y%m%d_%H%M%S")}.wav", wav_buffer, "audio/wav")}
+        filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        files = {"file": (filename, wav_buffer, "audio/wav")}
         response = requests.post(url, files=files)
 
     print("状态码:", response.status_code)
