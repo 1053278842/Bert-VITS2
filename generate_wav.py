@@ -30,7 +30,8 @@ def save_and_upload_tts(result, folder="output"):
     os.makedirs(folder, exist_ok=True)
 
     # 文件名 audio_20250923_153000.wav
-    filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    filename = f"audio.wav"
+    # filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
     file_path = os.path.join(folder, filename)
 
     # 保存到本地
@@ -78,7 +79,7 @@ if __name__ == "__main__":
     webui.hps = hps
     webui.net_g = net_g
 
-    text = "你好世界"
+    text = "你好，主人，我是墨小菊~"
     speaker = "mxj"
     sdp_ratio = 0.5
     noise_scale = 0.6
