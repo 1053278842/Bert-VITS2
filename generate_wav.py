@@ -6,32 +6,49 @@ import numpy as np
 from config import config
 from infer import latest_version, get_net_g
 from scipy.io.wavfile import write
-import datetime
 import webui   # 注意：额外导入 webui 模块本身，用于注入全局变量
 import requests
 import soundfile as sf
-from datetime import datetime
+from dotenv import load_dotenv
+from rabbitmq_utils import rabbitmq_client
+import json
+import hashlib
+from datetime import datetime, timedelta
+import threading
+import time
 
-url = "http://121.36.251.16:7999/api/upload"
+# 加载环境变量
+load_dotenv()
+url = os.environ.get("UPLOAD_API")
+if url is None:
+    print("未找到UPLOAD_API配置")
+    raise Exception("UPLOAD_API 环境变量未配置！请参考ai-butler-api项目接口")
 
-def save_and_upload_tts(result, folder="output"):
-    """
-    保存 tts_fn 结果到本地 wav 文件 → 上传到云端 → 删除本地文件
-    :param result: tts_fn 返回值, 形如 ("Success", (sr, audio_array))
-    :param folder: 临时保存的文件夹
-    """
+
+def init_tts():
+    device = config.webui_config.device
+    if device == "mps":
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
+    # 初始化 hps 和 net_g
+    hps = utils.get_hparams_from_file(config.webui_config.config_path)
+    version = hps.version if hasattr(hps, "version") else latest_version
+    net_g = get_net_g(
+        model_path=config.webui_config.model, version=version, device=device, hps=hps
+    )
+
+    # 注入到 webui 的全局变量
+    webui.hps = hps
+    webui.net_g = net_g
+    
+def save_and_upload_tts(result,filename, folder="output"):
     status, audio_data = result
     if status != "Success":
         raise ValueError(f"TTS 失败: {status}")
 
     sr, audio_array = audio_data
-
-    # 确保保存目录存在
     os.makedirs(folder, exist_ok=True)
-
-    # 文件名 audio_20250923_153000.wav
-    filename = f"audio.wav"
-    # filename = f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    filename = f"{filename}.wav"
     file_path = os.path.join(folder, filename)
 
     # 保存到本地
@@ -53,33 +70,9 @@ def save_and_upload_tts(result, folder="output"):
     except Exception as e:
         print(f"删除本地文件失败: {e}")
         
-def save_tts_result(result, filename="output.wav"):
-    status, audio_data = result
-    if status != "Success":
-        raise ValueError(f"TTS 失败: {status}")
 
-    sr, audio_array = audio_data
-    write(filename, sr, audio_array.astype(np.int16))
-    print(f"已保存音频到 {filename}")
-
-
-if __name__ == "__main__":
-    device = config.webui_config.device
-    if device == "mps":
-        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-
-    # 初始化 hps 和 net_g
-    hps = utils.get_hparams_from_file(config.webui_config.config_path)
-    version = hps.version if hasattr(hps, "version") else latest_version
-    net_g = get_net_g(
-        model_path=config.webui_config.model, version=version, device=device, hps=hps
-    )
-
-    # 注入到 webui 的全局变量
-    webui.hps = hps
-    webui.net_g = net_g
-
-    text = "你好，主人，我是墨小菊~"
+def tts(content):
+    text = content
     speaker = "mxj"
     sdp_ratio = 0.5
     noise_scale = 0.6
@@ -92,7 +85,7 @@ if __name__ == "__main__":
     style_text = ""
     style_weight = 0.7
 
-    result = tts_fn(
+    return tts_fn(
         text,
         speaker,
         sdp_ratio,
@@ -107,4 +100,77 @@ if __name__ == "__main__":
         style_weight,
     )
 
-    save_and_upload_tts(result=result)
+def mq_callback(ch, method, properties, body):
+    try:
+        # 解析消息 JSON
+        msg = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        print("消息不是有效的 JSON，跳过:", body)
+        return
+
+    # 检查 type 字段
+    msg_type = msg.get("type")
+    if msg_type != "normal" :
+        print("消息 type 不符合，跳过:", msg_type)
+        return
+
+    # 获取 question 字段并生成哈希
+    question = msg.get("question")
+    if not question:
+        print("消息没有 question 字段，跳过")
+        return
+
+    question_hash = hashlib.md5(question.encode("utf-8")).hexdigest()
+    
+    
+    # 获取 回答内容
+    answer = msg.get("answer")
+
+    
+    # 获取 time 字段并解析
+    time_str = msg.get("time")
+    if not time_str:
+        print("消息没有 time 字段，跳过")
+        return
+
+    try:
+        sent_time = datetime.fromisoformat(time_str)
+    except ValueError:
+        print("time 字段格式不正确，跳过:", time_str)
+        return
+
+    # 判断是否在 1 小时内
+    now = datetime.now()
+    if now - sent_time > timedelta(hours=1):
+        print(f"消息已过期 (>1h): {question}")
+        return
+
+    # 如果都符合条件，处理消息
+    print(f"消息有效 ✅")
+    print(f"问题哈希: {question_hash}")
+    print(f"问题原文: {question}")
+    print(f"发送时间: {time_str}")
+    print(f"回答内容: {answer}")
+    
+    if not answer:
+        answer ="好像...接收到转化内容哦~"
+    result = tts(answer)
+    save_and_upload_tts(result=result,filename=f"{msg_type}_{question_hash}")
+    
+
+if __name__ == "__main__":
+    # 初始化
+    init_tts()
+    
+    # 开辟新的线程 启动消费者 
+    def start_consumer():
+        try:
+            rabbitmq_client.consume(callback=mq_callback)
+        except Exception as e:
+            print("消费者线程异常:", e)
+
+    t = threading.Thread(target=start_consumer, daemon=True)
+    t.start()
+   
+    while True:
+        time.sleep(1)
