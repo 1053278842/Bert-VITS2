@@ -74,7 +74,7 @@ def save_and_upload_tts(result,filename, folder="output"):
 def tts(content):
     text = content
     speaker = "mxj"
-    sdp_ratio = 0.5
+    sdp_ratio = 0.3
     noise_scale = 0.6
     noise_scale_w = 0.9
     length_scale = 1
